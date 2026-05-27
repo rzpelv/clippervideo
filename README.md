@@ -38,8 +38,28 @@ The dev server sets the `Cross-Origin-Opener-Policy: same-origin` and `Cross-Ori
 
 ```bash
 npm run build
-npm run preview
+npm start   # serves dist/ on $PORT (default 4173) with COOP/COEP headers
 ```
+
+## Deploy to Railway
+
+The repo includes a tiny zero-dependency Node static server (`server.js`) that sets the COOP/COEP headers ffmpeg.wasm needs. Two ways to deploy:
+
+**Option A — Nixpacks (recommended)**
+
+1. Create a new Railway project → "Deploy from GitHub repo" → pick this repo
+2. Railway reads `railway.json` and runs:
+   - Build: `npm ci && npm run build`
+   - Start: `node server.js`
+3. Add a public domain in the service settings — Railway provides HTTPS automatically (required for `SharedArrayBuffer`)
+
+**Option B — Dockerfile**
+
+A multi-stage `Dockerfile` is included. In Railway, set the builder to "Dockerfile" if Nixpacks gives you trouble. No other config needed.
+
+No environment variables are required — users supply their own OpenAI API key in the in-app Settings dialog (stored in their own browser's localStorage).
+
+The healthcheck path is `/healthz`.
 
 ## Notes / limitations
 
