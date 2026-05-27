@@ -28,9 +28,13 @@ const MAX_VIDEO_BYTES = Number(process.env.MAX_VIDEO_BYTES) || 2 * 1024 * 1024 *
 //   - YTDLP_COOKIES         (Netscape-format cookies file content, set as a Railway env var)
 //   - YTDLP_COOKIES_FILE    (alternative: path to a pre-existing cookies file)
 //   - YTDLP_EXTRACTOR_ARGS  (override extractor args; default tries multiple YouTube clients)
+// Multi-client fallback: yt-dlp will try each client in order until one returns
+// playable formats. `default` (web) gives the widest format catalog when cookies
+// are configured; `android`/`ios`/`web_safari` are fallbacks that historically
+// resist the bot-check on datacenter IPs.
 const YTDLP_EXTRACTOR_ARGS =
   process.env.YTDLP_EXTRACTOR_ARGS ||
-  'youtube:player_client=tv,ios,web_safari;formats=missing_pot';
+  'youtube:player_client=default,android,ios,web_safari';
 const YTDLP_USER_AGENT =
   process.env.YTDLP_USER_AGENT ||
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15';
@@ -284,16 +288,19 @@ function streamWithYtDlp(url, res) {
   fs.mkdirSync(tmpDir, { recursive: true });
 
   const outTemplate = path.join(tmpDir, 'video.%(ext)s');
+  // Permissive format selector: prefer mp4-friendly streams, but accept any
+  // best+best or single-stream fallback. yt-dlp will then transcode/remux to
+  // mp4 via --merge-output-format. This avoids "Requested format is not
+  // available" failures when a given player_client only exposes DASH/HLS.
   const args = [
     url,
-    '-f', 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b',
+    '-f', 'bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b[ext=mp4]/b/best',
     '--merge-output-format', 'mp4',
     '--no-playlist',
     '--no-part',
     '--no-progress',
     '--no-warnings',
     '--restrict-filenames',
-    '--no-call-home',
     '--max-filesize', `${Math.floor(MAX_VIDEO_BYTES / (1024 * 1024))}M`,
     '--user-agent', YTDLP_USER_AGENT,
     '-o', outTemplate,
@@ -359,6 +366,13 @@ function streamWithYtDlp(url, res) {
         return sendJson(res, 415, {
           error: 'yt-dlp does not support this URL. Try a direct video link instead.',
           code: 'unsupported_url',
+        });
+      }
+      if (/Requested format is not available/i.test(stderr)) {
+        return sendJson(res, 502, {
+          error:
+            'No playable format was available for this video. The server tried multiple YouTube clients but none returned a downloadable stream. Updating yt-dlp on the server (rebuild the Railway image) usually fixes this.',
+          code: 'no_format_available',
         });
       }
       return sendJson(res, 502, { error: `yt-dlp failed (code ${code}): ${tail}` });
