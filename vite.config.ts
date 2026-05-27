@@ -9,6 +9,14 @@ export default defineConfig({
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'require-corp',
     },
+    // Proxy /api/* to the Node server (run separately via `node server.js`)
+    // so the URL-fetch endpoint works in dev too.
+    proxy: {
+      '/api': {
+        target: 'http://localhost:4173',
+        changeOrigin: true,
+      },
+    },
   },
   preview: {
     headers: {
