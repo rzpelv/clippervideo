@@ -1,6 +1,5 @@
 import type { HighlightSuggestion, Transcript, TranscriptSegment } from '../types';
-
-const OPENAI_BASE = 'https://api.openai.com/v1';
+import type { ProviderConfig } from './storage';
 
 interface WhisperVerboseResponse {
   task: string;
@@ -15,29 +14,38 @@ interface WhisperVerboseResponse {
   }>;
 }
 
-/** Transcribe audio via OpenAI Whisper, returning segment-level timestamps. */
+function normalizeBaseUrl(url: string): string {
+  return (url || 'https://api.openai.com/v1').trim().replace(/\/+$/, '');
+}
+
+/** Transcribe audio via an OpenAI-compatible /audio/transcriptions endpoint
+ *  (OpenAI Whisper, Groq Whisper, or any provider that mirrors the API). */
 export async function transcribeAudio(
   audio: Blob,
-  apiKey: string,
+  config: ProviderConfig,
   filename = 'audio.mp3'
 ): Promise<Transcript> {
-  if (!apiKey) throw new Error('Missing OpenAI API key.');
+  if (!config.apiKey) {
+    throw new Error('Missing API key for the transcription provider.');
+  }
+  const baseUrl = normalizeBaseUrl(config.baseUrl);
+  const model = config.model || 'whisper-1';
 
   const form = new FormData();
   form.append('file', audio, filename);
-  form.append('model', 'whisper-1');
+  form.append('model', model);
   form.append('response_format', 'verbose_json');
   form.append('timestamp_granularities[]', 'segment');
 
-  const res = await fetch(`${OPENAI_BASE}/audio/transcriptions`, {
+  const res = await fetch(`${baseUrl}/audio/transcriptions`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers: { Authorization: `Bearer ${config.apiKey}` },
     body: form,
   });
 
   if (!res.ok) {
     const detail = await safeError(res);
-    throw new Error(`Whisper transcription failed: ${detail}`);
+    throw new Error(`Transcription failed: ${detail}`);
   }
 
   const data = (await res.json()) as WhisperVerboseResponse;
@@ -64,18 +72,21 @@ export interface SuggestHighlightsOptions {
   mode?: HighlightMode;
 }
 
-/** Ask GPT to pick highlight clips from a timestamped transcript. */
+/** Ask an LLM (OpenAI-compatible Chat Completions) to pick highlight clips. */
 export async function suggestHighlights(
   transcript: Transcript,
   duration: number,
-  apiKey: string,
-  model: string,
+  config: ProviderConfig,
   options: SuggestHighlightsOptions = {}
 ): Promise<HighlightSuggestion[]> {
-  if (!apiKey) throw new Error('Missing OpenAI API key.');
+  if (!config.apiKey) {
+    throw new Error('Missing API key for the chat provider.');
+  }
   if (transcript.segments.length === 0) {
     throw new Error('Transcript is empty — nothing to summarize.');
   }
+  const baseUrl = normalizeBaseUrl(config.baseUrl);
+  const model = config.model || 'gpt-4o-mini';
 
   const mode: HighlightMode = options.mode ?? 'highlight';
   const count = options.count ?? (mode === 'hook' ? 5 : 3);
@@ -91,7 +102,7 @@ export async function suggestHighlights(
       ? [
           'You are a viral short-form video editor (YouTube Shorts, TikTok, Reels).',
           'Pick non-overlapping moments from a timestamped transcript that each work as a standalone short.',
-          `Each clip should be 15 to 60 seconds long, snapped to natural conversational boundaries.`,
+          'Each clip should be 15 to 60 seconds long, snapped to natural conversational boundaries.',
           'For each clip:',
           '- "title" must be a HOOK in the same language as the transcript: bold, specific, curiosity-inducing or action-oriented. Under 80 characters. No clickbait emoji spam.',
           '- "reason" is one short sentence explaining what makes the moment worth watching.',
@@ -122,22 +133,43 @@ export async function suggestHighlights(
           transcriptText,
         ].join('\n\n');
 
-  const res = await fetch(`${OPENAI_BASE}/chat/completions`, {
+  const body: Record<string, unknown> = {
+    model,
+    temperature: mode === 'hook' ? 0.7 : 0.4,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+  };
+
+  let res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${config.apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model,
-      temperature: mode === 'hook' ? 0.7 : 0.4,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-    }),
+    body: JSON.stringify(body),
   });
+
+  // Some providers / models reject response_format=json_object. Retry without it
+  // and rely on extractJson() to scrape the JSON block from the model's output.
+  if (!res.ok && res.status === 400) {
+    const text = await res.text().catch(() => '');
+    if (/response_format|json_object/i.test(text)) {
+      delete (body as Record<string, unknown>).response_format;
+      res = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+    } else {
+      throw new Error(`Highlight suggestion failed: ${text || `HTTP ${res.status}`}`);
+    }
+  }
 
   if (!res.ok) {
     const detail = await safeError(res);
@@ -145,12 +177,11 @@ export async function suggestHighlights(
   }
 
   const data = await res.json();
-  const content: string = data?.choices?.[0]?.message?.content ?? '{}';
-  let parsed: { highlights?: HighlightSuggestion[] };
-  try {
-    parsed = JSON.parse(content);
-  } catch {
-    throw new Error('Model returned non-JSON content.');
+  const content: string = data?.choices?.[0]?.message?.content ?? '';
+  const parsed = extractJson<{ highlights?: HighlightSuggestion[] }>(content);
+
+  if (!parsed) {
+    throw new Error('Model did not return parseable JSON. Try a different model.');
   }
 
   const highlights = (parsed.highlights ?? [])
@@ -184,6 +215,24 @@ export function transcriptForRange(
     .trim();
 }
 
+/** Try strict JSON.parse first; if that fails, scrape the first {...} block. */
+function extractJson<T>(content: string): T | null {
+  if (!content) return null;
+  try {
+    return JSON.parse(content) as T;
+  } catch {
+    /* fall through */
+  }
+  const first = content.indexOf('{');
+  const last = content.lastIndexOf('}');
+  if (first === -1 || last === -1 || last <= first) return null;
+  try {
+    return JSON.parse(content.slice(first, last + 1)) as T;
+  } catch {
+    return null;
+  }
+}
+
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.max(min, Math.min(max, value));
@@ -192,8 +241,13 @@ function clamp(value: number, min: number, max: number): number {
 async function safeError(res: Response): Promise<string> {
   try {
     const data = await res.json();
-    return data?.error?.message || `HTTP ${res.status}`;
+    return data?.error?.message || data?.error || `HTTP ${res.status}`;
   } catch {
-    return `HTTP ${res.status}`;
+    try {
+      const t = await res.text();
+      return t || `HTTP ${res.status}`;
+    } catch {
+      return `HTTP ${res.status}`;
+    }
   }
 }

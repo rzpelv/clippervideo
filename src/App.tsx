@@ -13,7 +13,7 @@ import {
   getFFmpeg,
 } from './lib/ffmpeg';
 import { suggestHighlights, transcribeAudio } from './lib/openai';
-import { storage } from './lib/storage';
+import { storage, type ProviderConfig } from './lib/storage';
 import type {
   AiTaskStatus,
   ClipStatus,
@@ -34,13 +34,19 @@ export default function App() {
   const [aiStatus, setAiStatus] = useState<AiTaskStatus>({ kind: 'idle' });
   const [highlights, setHighlights] = useState<HighlightSuggestion[]>([]);
 
-  const [apiKey, setApiKeyState] = useState<string>(() => storage.getApiKey());
-  const [chatModel, setChatModelState] = useState<string>(() => storage.getChatModel());
+  const [transcribeConfig, setTranscribeConfig] = useState<ProviderConfig>(() =>
+    storage.getTranscribeConfig()
+  );
+  const [chatConfig, setChatConfig] = useState<ProviderConfig>(() =>
+    storage.getChatConfig()
+  );
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const playerRef = useRef<VideoPlayerHandle>(null);
 
-  const hasApiKey = Boolean(apiKey);
+  const hasTranscribeKey = Boolean(transcribeConfig.apiKey);
+  const hasChatKey = Boolean(chatConfig.apiKey);
+  const hasAnyKey = hasTranscribeKey || hasChatKey;
 
   // Reset state when a new video is loaded.
   const handleVideoLoaded = useCallback((src: VideoSource) => {
@@ -99,11 +105,11 @@ export default function App() {
   }, [video, start, end, reencode]);
 
   const handleTranscribe = useCallback(async () => {
-    if (!video || !apiKey) return;
+    if (!video || !hasTranscribeKey) return;
     setAiStatus({ kind: 'running', label: 'Transcribing audio…' });
     try {
       const audio = await extractAudioForTranscription(video.file);
-      const t = await transcribeAudio(audio, apiKey, `${video.name}.mp3`);
+      const t = await transcribeAudio(audio, transcribeConfig, `${video.name}.mp3`);
       setTranscript(t);
       setAiStatus({ kind: 'idle' });
     } catch (err) {
@@ -112,19 +118,16 @@ export default function App() {
         message: err instanceof Error ? err.message : String(err),
       });
     }
-  }, [video, apiKey]);
+  }, [video, hasTranscribeKey, transcribeConfig]);
 
   const handleSuggest = useCallback(async () => {
-    if (!video || !transcript || !apiKey) return;
+    if (!video || !transcript || !hasChatKey) return;
     setAiStatus({ kind: 'running', label: 'Highlighting…' });
     try {
-      const result = await suggestHighlights(
-        transcript,
-        video.duration,
-        apiKey,
-        chatModel,
-        { count: 3, targetSeconds: 30 }
-      );
+      const result = await suggestHighlights(transcript, video.duration, chatConfig, {
+        count: 3,
+        targetSeconds: 30,
+      });
       setHighlights(result);
       setAiStatus({ kind: 'idle' });
     } catch (err) {
@@ -133,21 +136,21 @@ export default function App() {
         message: err instanceof Error ? err.message : String(err),
       });
     }
-  }, [video, transcript, apiKey, chatModel]);
+  }, [video, transcript, hasChatKey, chatConfig]);
 
   /** End-to-end auto-clip: transcribe (if needed) → AI hooks → display. */
   const handleAutoClip = useCallback(async () => {
-    if (!video || !apiKey) return;
+    if (!video || !hasTranscribeKey || !hasChatKey) return;
     try {
       let t = transcript;
       if (!t) {
         setAiStatus({ kind: 'running', label: 'Transcribing audio…' });
         const audio = await extractAudioForTranscription(video.file);
-        t = await transcribeAudio(audio, apiKey, `${video.name}.mp3`);
+        t = await transcribeAudio(audio, transcribeConfig, `${video.name}.mp3`);
         setTranscript(t);
       }
       setAiStatus({ kind: 'running', label: 'Finding the best moments…' });
-      const result = await suggestHighlights(t, video.duration, apiKey, chatModel, {
+      const result = await suggestHighlights(t, video.duration, chatConfig, {
         count: 5,
         mode: 'hook',
       });
@@ -159,7 +162,7 @@ export default function App() {
         message: err instanceof Error ? err.message : String(err),
       });
     }
-  }, [video, transcript, apiKey, chatModel]);
+  }, [video, transcript, hasTranscribeKey, hasChatKey, transcribeConfig, chatConfig]);
 
   const applyHighlight = useCallback((h: HighlightSuggestion) => {
     setStart(h.start);
@@ -167,12 +170,15 @@ export default function App() {
     playerRef.current?.seek(h.start);
   }, []);
 
-  const handleSaveSettings = useCallback((key: string, model: string) => {
-    storage.setApiKey(key);
-    storage.setChatModel(model);
-    setApiKeyState(key);
-    setChatModelState(model);
-  }, []);
+  const handleSaveSettings = useCallback(
+    (t: ProviderConfig, c: ProviderConfig) => {
+      storage.setTranscribeConfig(t);
+      storage.setChatConfig(c);
+      setTranscribeConfig(t);
+      setChatConfig(c);
+    },
+    []
+  );
 
   const duration = video?.duration ?? 0;
 
@@ -184,7 +190,7 @@ export default function App() {
           className="btn btn--ghost"
           onClick={() => setSettingsOpen(true)}
         >
-          {hasApiKey ? 'Settings' : 'Set API key'}
+          {hasAnyKey ? 'AI Providers' : 'Set up AI'}
         </button>
         {video && (
           <button
@@ -203,7 +209,7 @@ export default function App() {
         )}
       </div>
     ),
-    [hasApiKey, video]
+    [hasAnyKey, video]
   );
 
   return (
@@ -267,7 +273,7 @@ export default function App() {
 
             <aside className="layout__side">
               <AutoClipPanel
-                hasApiKey={hasApiKey}
+                hasApiKey={hasTranscribeKey && hasChatKey}
                 hasVideo={Boolean(video)}
                 status={aiStatus}
                 resultCount={highlights.length}
@@ -276,7 +282,7 @@ export default function App() {
               <TranscriptPanel
                 transcript={transcript}
                 status={aiStatus}
-                hasApiKey={hasApiKey}
+                hasApiKey={hasTranscribeKey}
                 currentTime={currentTime}
                 onTranscribe={handleTranscribe}
                 onJump={handleSeek}
@@ -284,7 +290,7 @@ export default function App() {
               <HighlightsPanel
                 highlights={highlights}
                 status={aiStatus}
-                canRun={Boolean(transcript && hasApiKey)}
+                canRun={Boolean(transcript && hasChatKey)}
                 onSuggest={handleSuggest}
                 onApply={applyHighlight}
               />
@@ -294,14 +300,14 @@ export default function App() {
       </main>
 
       <footer className="footer muted">
-        Built with React, ffmpeg.wasm, and OpenAI · your video and key never leave your device
-        except for direct calls to api.openai.com.
+        Built with React + ffmpeg.wasm · works with any OpenAI-compatible AI provider ·
+        your video and API keys never leave your device.
       </footer>
 
       <SettingsModal
         open={settingsOpen}
-        initialKey={apiKey}
-        initialModel={chatModel}
+        initialTranscribe={transcribeConfig}
+        initialChat={chatConfig}
         onSave={handleSaveSettings}
         onClose={() => setSettingsOpen(false)}
       />
