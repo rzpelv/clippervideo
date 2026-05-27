@@ -1,12 +1,15 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
+// Self-host ffmpeg-core via Vite's `?url` import: the files are emitted into
+// our own `dist/assets/` and served same-origin, which avoids the
+// Cross-Origin-Embedder-Policy: require-corp block that breaks fetches to
+// unpkg / jsdelivr / other CDNs that don't set Cross-Origin-Resource-Policy.
+import coreUrl from '@ffmpeg/core/dist/umd/ffmpeg-core.js?url';
+import wasmUrl from '@ffmpeg/core/dist/umd/ffmpeg-core.wasm?url';
 import { toFfmpegTime } from './format';
 
 let ffmpegSingleton: FFmpeg | null = null;
 let loadPromise: Promise<FFmpeg> | null = null;
-
-const CORE_VERSION = '0.12.6';
-const BASE_URL = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/umd`;
 
 /** Lazy-load ffmpeg.wasm once. The core is fetched as blob URLs to satisfy COEP. */
 export async function getFFmpeg(
@@ -20,11 +23,8 @@ export async function getFFmpeg(
     if (onLog) ff.on('log', ({ message }) => onLog(message));
 
     await ff.load({
-      coreURL: await toBlobURL(`${BASE_URL}/ffmpeg-core.js`, 'text/javascript'),
-      wasmURL: await toBlobURL(
-        `${BASE_URL}/ffmpeg-core.wasm`,
-        'application/wasm'
-      ),
+      coreURL: await toBlobURL(coreUrl, 'text/javascript'),
+      wasmURL: await toBlobURL(wasmUrl, 'application/wasm'),
     });
 
     ffmpegSingleton = ff;

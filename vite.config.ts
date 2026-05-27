@@ -25,6 +25,10 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util'],
+    // Don't pre-bundle the FFmpeg packages — they ship UMD/worker code that
+    // doesn't survive Vite's dep optimizer.
+    exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util', '@ffmpeg/core'],
   },
+  // Make sure the .wasm file imported via `?url` is treated as a static asset.
+  assetsInclude: ['**/*.wasm'],
 });
