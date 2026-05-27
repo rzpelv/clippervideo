@@ -374,3 +374,49 @@ button { font: inherit; }
 }
 .highlights__reason { font-size: 0.8rem; }
 .highlights__use { align-self: flex-start; font-size: 0.85rem; }
+
+
+
+/* Settings modal — multi-provider */
+.modal__panel--wide { max-width: 540px; }
+.modal__header { display: flex; flex-direction: column; gap: 0.25rem; }
+
+.btn--sm { padding: 0.35rem 0.6rem; font-size: 0.8rem; }
+
+.quickstart {
+  display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;
+  padding: 0.4rem 0; font-size: 0.85rem;
+}
+
+.check--block { display: flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0; }
+
+.provider-section {
+  display: flex; flex-direction: column; gap: 0.55rem;
+  padding: 0.85rem 0.9rem;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.provider-section__title {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 0.1rem;
+}
+.provider-section__warn {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+}
+.field a { font-size: 0.75rem; text-decoration: none; }
+.field a:hover { text-decoration: underline; }
+.field select {
+  background: var(--bg-elev);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.55rem;
+  font: inherit;
+}

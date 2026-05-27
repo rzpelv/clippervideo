@@ -27,7 +27,7 @@ export function TranscriptPanel({
           className="btn btn--primary"
           onClick={onTranscribe}
           disabled={!hasApiKey || status.kind === 'running'}
-          title={hasApiKey ? '' : 'Set your OpenAI API key in Settings'}
+          title={hasApiKey ? '' : 'Configure your transcription provider in AI Providers'}
         >
           {status.kind === 'running' && status.label.includes('Transcrib')
             ? 'Transcribing…'
@@ -38,7 +38,7 @@ export function TranscriptPanel({
       </div>
 
       {!hasApiKey && (
-        <p className="muted">Add an OpenAI API key in Settings to enable AI features.</p>
+        <p className="muted">Configure a transcription provider in AI Providers to enable this.</p>
       )}
       {status.kind === 'error' && <p className="error">{status.message}</p>}
 

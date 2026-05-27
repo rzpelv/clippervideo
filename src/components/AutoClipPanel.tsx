@@ -41,7 +41,7 @@ export function AutoClipPanel({
         disabled={!hasApiKey || !hasVideo || running}
         title={
           !hasApiKey
-            ? 'Set your OpenAI API key in Settings'
+            ? 'Configure transcription and chat providers in AI Providers'
             : !hasVideo
             ? 'Load a video first'
             : ''
@@ -54,7 +54,8 @@ export function AutoClipPanel({
 
       {!hasApiKey && (
         <p className="muted autoclip__hint">
-          Add an OpenAI API key in <strong>Settings</strong> to enable auto-clip.
+          Open <strong>AI Providers</strong> to add your API keys for transcription
+          and chat.
         </p>
       )}
     </div>
