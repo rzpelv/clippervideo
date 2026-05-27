@@ -21,8 +21,12 @@ export interface Transcript {
 export interface HighlightSuggestion {
   start: number;
   end: number;
+  /** Hook-style or descriptive title for the clip. */
   title: string;
+  /** One-sentence justification from the model. */
   reason: string;
+  /** Concatenated transcript text covering this clip's time range. */
+  transcript?: string;
 }
 
 export type ClipStatus =
