@@ -55,39 +55,72 @@ export async function transcribeAudio(
   };
 }
 
+export type HighlightMode = 'highlight' | 'hook';
+
+export interface SuggestHighlightsOptions {
+  count?: number;
+  /** Target seconds; ignored in 'hook' mode where the model picks naturally. */
+  targetSeconds?: number;
+  mode?: HighlightMode;
+}
+
 /** Ask GPT to pick highlight clips from a timestamped transcript. */
 export async function suggestHighlights(
   transcript: Transcript,
   duration: number,
   apiKey: string,
   model: string,
-  options: { count?: number; targetSeconds?: number } = {}
+  options: SuggestHighlightsOptions = {}
 ): Promise<HighlightSuggestion[]> {
   if (!apiKey) throw new Error('Missing OpenAI API key.');
   if (transcript.segments.length === 0) {
     throw new Error('Transcript is empty — nothing to summarize.');
   }
 
-  const count = options.count ?? 3;
+  const mode: HighlightMode = options.mode ?? 'highlight';
+  const count = options.count ?? (mode === 'hook' ? 5 : 3);
   const target = options.targetSeconds ?? 30;
+  const language = transcript.language || 'the original language of the transcript';
 
   const transcriptText = transcript.segments
     .map((s) => `[${s.start.toFixed(2)}-${s.end.toFixed(2)}] ${s.text}`)
     .join('\n');
 
-  const system = [
-    'You are a video editor that picks the most engaging moments from a transcript.',
-    'Return STRICT JSON of the form: {"highlights":[{"start":number,"end":number,"title":string,"reason":string}]}.',
-    'Times are in seconds, must be within the video duration, and start < end.',
-    'Pick non-overlapping highlights. Keep titles under 60 characters.',
-  ].join(' ');
+  const system =
+    mode === 'hook'
+      ? [
+          'You are a viral short-form video editor (YouTube Shorts, TikTok, Reels).',
+          'Pick non-overlapping moments from a timestamped transcript that each work as a standalone short.',
+          `Each clip should be 15 to 60 seconds long, snapped to natural conversational boundaries.`,
+          'For each clip:',
+          '- "title" must be a HOOK in the same language as the transcript: bold, specific, curiosity-inducing or action-oriented. Under 80 characters. No clickbait emoji spam.',
+          '- "reason" is one short sentence explaining what makes the moment worth watching.',
+          'Order clips by hook strength (best first).',
+          'Return STRICT JSON: {"highlights":[{"start":number,"end":number,"title":string,"reason":string}]}',
+          'Times are in seconds, must be within the video duration, and start < end.',
+        ].join(' ')
+      : [
+          'You are a video editor that picks the most engaging moments from a transcript.',
+          'Return STRICT JSON of the form: {"highlights":[{"start":number,"end":number,"title":string,"reason":string}]}.',
+          'Times are in seconds, must be within the video duration, and start < end.',
+          'Pick non-overlapping highlights. Keep titles under 60 characters.',
+        ].join(' ');
 
-  const user = [
-    `Video duration: ${duration.toFixed(2)} seconds.`,
-    `Pick ${count} highlight clips, each roughly ${target} seconds long.`,
-    'Transcript with timestamps:',
-    transcriptText,
-  ].join('\n\n');
+  const user =
+    mode === 'hook'
+      ? [
+          `Video duration: ${duration.toFixed(2)} seconds.`,
+          `Transcript language: ${language}. Generate hook titles in the SAME language.`,
+          `Pick the ${count} strongest standalone clips. Vary durations between 15 and 60 seconds based on what fits each moment.`,
+          'Transcript with timestamps:',
+          transcriptText,
+        ].join('\n\n')
+      : [
+          `Video duration: ${duration.toFixed(2)} seconds.`,
+          `Pick ${count} highlight clips, each roughly ${target} seconds long.`,
+          'Transcript with timestamps:',
+          transcriptText,
+        ].join('\n\n');
 
   const res = await fetch(`${OPENAI_BASE}/chat/completions`, {
     method: 'POST',
@@ -97,7 +130,7 @@ export async function suggestHighlights(
     },
     body: JSON.stringify({
       model,
-      temperature: 0.4,
+      temperature: mode === 'hook' ? 0.7 : 0.4,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: system },
@@ -121,15 +154,34 @@ export async function suggestHighlights(
   }
 
   const highlights = (parsed.highlights ?? [])
-    .map((h) => ({
-      start: clamp(Number(h.start), 0, duration),
-      end: clamp(Number(h.end), 0, duration),
-      title: String(h.title ?? '').slice(0, 80),
-      reason: String(h.reason ?? ''),
-    }))
+    .map((h) => {
+      const startClamped = clamp(Number(h.start), 0, duration);
+      const endClamped = clamp(Number(h.end), 0, duration);
+      return {
+        start: startClamped,
+        end: endClamped,
+        title: String(h.title ?? '').slice(0, 100),
+        reason: String(h.reason ?? ''),
+        transcript: transcriptForRange(transcript.segments, startClamped, endClamped),
+      };
+    })
     .filter((h) => h.end > h.start);
 
   return highlights;
+}
+
+/** Concatenate transcript segments that overlap [start, end]. */
+export function transcriptForRange(
+  segments: TranscriptSegment[],
+  start: number,
+  end: number
+): string {
+  return segments
+    .filter((s) => s.start < end && s.end > start)
+    .map((s) => s.text.trim())
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function clamp(value: number, min: number, max: number): number {

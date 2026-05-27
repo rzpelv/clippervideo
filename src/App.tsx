@@ -5,6 +5,7 @@ import { Timeline } from './components/Timeline';
 import { ClipControls } from './components/ClipControls';
 import { TranscriptPanel } from './components/TranscriptPanel';
 import { HighlightsPanel } from './components/HighlightsPanel';
+import { AutoClipPanel } from './components/AutoClipPanel';
 import { SettingsModal } from './components/SettingsModal';
 import {
   clipVideo,
@@ -134,6 +135,32 @@ export default function App() {
     }
   }, [video, transcript, apiKey, chatModel]);
 
+  /** End-to-end auto-clip: transcribe (if needed) → AI hooks → display. */
+  const handleAutoClip = useCallback(async () => {
+    if (!video || !apiKey) return;
+    try {
+      let t = transcript;
+      if (!t) {
+        setAiStatus({ kind: 'running', label: 'Transcribing audio…' });
+        const audio = await extractAudioForTranscription(video.file);
+        t = await transcribeAudio(audio, apiKey, `${video.name}.mp3`);
+        setTranscript(t);
+      }
+      setAiStatus({ kind: 'running', label: 'Finding the best moments…' });
+      const result = await suggestHighlights(t, video.duration, apiKey, chatModel, {
+        count: 5,
+        mode: 'hook',
+      });
+      setHighlights(result);
+      setAiStatus({ kind: 'idle' });
+    } catch (err) {
+      setAiStatus({
+        kind: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, [video, transcript, apiKey, chatModel]);
+
   const applyHighlight = useCallback((h: HighlightSuggestion) => {
     setStart(h.start);
     setEnd(h.end);
@@ -239,6 +266,13 @@ export default function App() {
             </section>
 
             <aside className="layout__side">
+              <AutoClipPanel
+                hasApiKey={hasApiKey}
+                hasVideo={Boolean(video)}
+                status={aiStatus}
+                resultCount={highlights.length}
+                onAutoClip={handleAutoClip}
+              />
               <TranscriptPanel
                 transcript={transcript}
                 status={aiStatus}
