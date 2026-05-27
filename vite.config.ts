@@ -25,10 +25,9 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    // Don't pre-bundle the FFmpeg packages — they ship UMD/worker code that
-    // doesn't survive Vite's dep optimizer.
-    exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util', '@ffmpeg/core'],
+    // The FFmpeg packages ship UMD/worker code that doesn't survive Vite's
+    // dep optimizer. ffmpeg-core itself isn't imported from JS — it's served
+    // as a static asset from public/ffmpeg/ (see scripts/setup-ffmpeg.mjs).
+    exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util'],
   },
-  // Make sure the .wasm file imported via `?url` is treated as a static asset.
-  assetsInclude: ['**/*.wasm'],
 });

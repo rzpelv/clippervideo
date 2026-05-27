@@ -8,6 +8,8 @@ COPY package.json package-lock.json* ./
 RUN npm install --no-audit --no-fund
 
 COPY . .
+# `npm run build` runs the `prebuild` hook first, which downloads
+# ffmpeg-core into public/ffmpeg/ so Vite ships it as a same-origin asset.
 RUN npm run build
 
 # ---------- runtime ----------
@@ -19,16 +21,15 @@ ENV NODE_ENV=production \
     PORT=4173 \
     YTDLP_BIN=/usr/local/bin/yt-dlp
 
-# Python + ffmpeg are required by yt-dlp.
-RUN apk add --no-cache python3 ffmpeg ca-certificates tini
-
-# Download the latest yt-dlp standalone binary. Using ADD with a remote URL
-# means Docker checksum-checks the upstream file each build, so when yt-dlp
-# ships a new release the cached layer is invalidated and we pick it up.
-# (RUN wget would always be cache-hit until the instruction text changes,
-# which is why builds were silently shipping a stale yt-dlp.)
-ADD https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp /usr/local/bin/yt-dlp
-RUN chmod +x /usr/local/bin/yt-dlp && \
+# Python + ffmpeg are required by yt-dlp. Download the standalone yt-dlp
+# binary directly from GitHub releases. RUN-based fetch is more compatible
+# with restrictive Docker builders (some BuildKit setups reject `ADD <URL>`
+# without an explicit checksum). The on-startup yt-dlp self-update in
+# server.js (--update-to nightly) keeps the binary fresh between rebuilds.
+RUN apk add --no-cache python3 ffmpeg ca-certificates wget tini && \
+    wget -qO /usr/local/bin/yt-dlp \
+        https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp && \
+    chmod +x /usr/local/bin/yt-dlp && \
     /usr/local/bin/yt-dlp --version
 
 COPY --from=build /app/dist ./dist

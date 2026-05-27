@@ -7,3 +7,7 @@ dist-ssr
 .env.local
 .vite
 *.log
+
+# ffmpeg-core is fetched at build time by scripts/setup-ffmpeg.mjs.
+# Don't commit the binary blobs; they regenerate per build.
+public/ffmpeg/
