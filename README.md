@@ -72,8 +72,37 @@ No environment variables are required. Optional ones:
 | `MAX_VIDEO_BYTES` | `2147483648` (2 GiB) | Hard cap per fetched video |
 | `FETCH_VIDEO_TIMEOUT_MS` | `900000` (15 min) | yt-dlp / direct-fetch timeout |
 | `YTDLP_BIN` | `yt-dlp` | Override path to the yt-dlp binary |
+| `YTDLP_COOKIES` | _(unset)_ | Inline Netscape-format cookies file content (see below) |
+| `YTDLP_COOKIES_FILE` | _(unset)_ | Alternative: path to an existing cookies file |
+| `YTDLP_EXTRACTOR_ARGS` | `youtube:player_client=tv,ios,web_safari;formats=missing_pot` | Custom yt-dlp `--extractor-args` |
+| `YTDLP_USER_AGENT` | _Safari macOS_ | Custom `--user-agent` for yt-dlp |
 
 The healthcheck path is `/healthz`.
+
+### Handling the YouTube "Sign in to confirm you're not a bot" error
+
+YouTube increasingly blocks unauthenticated requests from datacenter IPs (Railway, Fly, Render, AWS, …). When this happens yt-dlp returns:
+
+> ERROR: [youtube] XXXXX: Sign in to confirm you're not a bot.
+
+The reliable workaround is to give yt-dlp a cookie jar from a logged-in browser session.
+
+1. **Export cookies from your browser** using a Netscape-format extension, e.g.
+   - Chrome / Edge: ["Get cookies.txt LOCALLY"](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc)
+   - Firefox: ["cookies.txt"](https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/)
+   - Visit `youtube.com` while logged in, click the extension, export — you get a plain-text file
+2. **Set it as a Railway env var**:
+   - Service → **Variables** → New Variable
+   - Name: `YTDLP_COOKIES`
+   - Value: paste the **entire content** of the cookies file (multi-line is fine)
+   - Redeploy
+3. The server writes the cookies to a private temp file at startup and passes `--cookies` to yt-dlp on every YouTube request.
+
+Cookies expire (typically 1–2 weeks for YouTube). When you start seeing the bot-check error again, re-export and update the variable.
+
+**Security note**: a YouTube cookies file gives anyone with it full access to your YouTube account. Use a throwaway Google account for this if the deployment is shared, and never commit cookies to the repo.
+
+If you don't want to deal with cookies, the paste-URL feature still works for **direct video URLs** (`.mp4`, `.webm`, `.mov`, …) and for many non-YouTube sites that don't enforce this check.
 
 ## Notes / limitations
 
