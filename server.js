@@ -23,6 +23,34 @@ const YTDLP_BIN = process.env.YTDLP_BIN || 'yt-dlp';
 const FETCH_VIDEO_TIMEOUT_MS = Number(process.env.FETCH_VIDEO_TIMEOUT_MS) || 15 * 60 * 1000;
 const MAX_VIDEO_BYTES = Number(process.env.MAX_VIDEO_BYTES) || 2 * 1024 * 1024 * 1024; // 2 GiB
 
+// YouTube and other sites increasingly block datacenter IPs (Railway, Fly, etc.)
+// Two knobs to work around the bot check:
+//   - YTDLP_COOKIES         (Netscape-format cookies file content, set as a Railway env var)
+//   - YTDLP_COOKIES_FILE    (alternative: path to a pre-existing cookies file)
+//   - YTDLP_EXTRACTOR_ARGS  (override extractor args; default tries multiple YouTube clients)
+const YTDLP_EXTRACTOR_ARGS =
+  process.env.YTDLP_EXTRACTOR_ARGS ||
+  'youtube:player_client=tv,ios,web_safari;formats=missing_pot';
+const YTDLP_USER_AGENT =
+  process.env.YTDLP_USER_AGENT ||
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15';
+
+// Resolve the cookies file once at startup. If YTDLP_COOKIES is provided inline,
+// write it to a tmp file with restrictive permissions.
+let YTDLP_COOKIES_PATH = process.env.YTDLP_COOKIES_FILE || '';
+if (!YTDLP_COOKIES_PATH && process.env.YTDLP_COOKIES) {
+  try {
+    YTDLP_COOKIES_PATH = path.join(os.tmpdir(), `clipper-cookies-${crypto.randomUUID()}.txt`);
+    fs.writeFileSync(YTDLP_COOKIES_PATH, process.env.YTDLP_COOKIES, { mode: 0o600 });
+    console.log(`[yt-dlp] cookies written to ${YTDLP_COOKIES_PATH}`);
+  } catch (e) {
+    console.error(`[yt-dlp] failed to write cookies file: ${e.message}`);
+    YTDLP_COOKIES_PATH = '';
+  }
+} else if (YTDLP_COOKIES_PATH) {
+  console.log(`[yt-dlp] using cookies from ${YTDLP_COOKIES_PATH}`);
+}
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js':   'text/javascript; charset=utf-8',
@@ -267,8 +295,12 @@ function streamWithYtDlp(url, res) {
     '--restrict-filenames',
     '--no-call-home',
     '--max-filesize', `${Math.floor(MAX_VIDEO_BYTES / (1024 * 1024))}M`,
+    '--user-agent', YTDLP_USER_AGENT,
     '-o', outTemplate,
   ];
+
+  if (YTDLP_EXTRACTOR_ARGS) args.push('--extractor-args', YTDLP_EXTRACTOR_ARGS);
+  if (YTDLP_COOKIES_PATH) args.push('--cookies', YTDLP_COOKIES_PATH);
 
   const proc = spawn(YTDLP_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   let stderr = '';
@@ -303,7 +335,33 @@ function streamWithYtDlp(url, res) {
     }
     if (code !== 0) {
       cleanupDir(tmpDir);
-      return sendJson(res, 502, { error: `yt-dlp failed (code ${code}): ${stderr.slice(-400) || 'no output'}` });
+      const tail = stderr.slice(-600) || 'no output';
+
+      // Detect the YouTube bot-check / sign-in prompt and return a friendlier message.
+      if (
+        /Sign in to confirm|confirm you'?re not a bot|This video is only available for/i.test(stderr)
+      ) {
+        const hasCookies = Boolean(YTDLP_COOKIES_PATH);
+        return sendJson(res, 403, {
+          error: hasCookies
+            ? 'YouTube blocked the request even with cookies. Your cookies may have expired — re-export them and update the YTDLP_COOKIES env var.'
+            : 'YouTube is requiring login for this server IP. The site admin needs to set the YTDLP_COOKIES env var (Netscape-format cookies exported from a logged-in browser). See README → "Handling the YouTube bot check".',
+          code: 'youtube_bot_check',
+        });
+      }
+      if (/Video unavailable|Private video|members[- ]only/i.test(stderr)) {
+        return sendJson(res, 404, {
+          error: 'This video is private, members-only, age-restricted, or unavailable.',
+          code: 'video_unavailable',
+        });
+      }
+      if (/Unsupported URL|Unable to extract/i.test(stderr)) {
+        return sendJson(res, 415, {
+          error: 'yt-dlp does not support this URL. Try a direct video link instead.',
+          code: 'unsupported_url',
+        });
+      }
+      return sendJson(res, 502, { error: `yt-dlp failed (code ${code}): ${tail}` });
     }
     let files;
     try {
