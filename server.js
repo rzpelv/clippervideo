@@ -55,6 +55,43 @@ if (!YTDLP_COOKIES_PATH && process.env.YTDLP_COOKIES) {
   console.log(`[yt-dlp] using cookies from ${YTDLP_COOKIES_PATH}`);
 }
 
+// YouTube changes its API often, so a yt-dlp binary that's only a few weeks
+// old can already be unable to extract any format. We auto-update on container
+// start (non-blocking) so a Railway restart picks up the latest channel without
+// needing a Docker rebuild. Set YTDLP_AUTO_UPDATE=false to disable.
+function maybeUpdateYtDlp() {
+  if (process.env.YTDLP_AUTO_UPDATE === 'false') {
+    console.log('[yt-dlp] auto-update disabled (YTDLP_AUTO_UPDATE=false)');
+    return;
+  }
+  const channel = process.env.YTDLP_UPDATE_CHANNEL || 'nightly';
+  console.log(`[yt-dlp] auto-updating to ${channel} in background…`);
+
+  const proc = spawn(YTDLP_BIN, ['--update-to', channel], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let out = '';
+  proc.stdout.on('data', (d) => { out += d.toString(); });
+  proc.stderr.on('data', (d) => { out += d.toString(); });
+
+  const timer = setTimeout(() => {
+    console.warn('[yt-dlp] update timed out, leaving installed version in place');
+    proc.kill('SIGTERM');
+  }, 90 * 1000);
+
+  proc.on('close', (code) => {
+    clearTimeout(timer);
+    const tail = out.trim().split('\n').slice(-2).join(' | ').slice(-300);
+    if (code === 0) console.log(`[yt-dlp] update OK: ${tail || 'already up to date'}`);
+    else console.warn(`[yt-dlp] update failed (code ${code}): ${tail}`);
+  });
+  proc.on('error', (err) => {
+    clearTimeout(timer);
+    console.warn(`[yt-dlp] update spawn error: ${err.message}`);
+  });
+}
+maybeUpdateYtDlp();
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js':   'text/javascript; charset=utf-8',

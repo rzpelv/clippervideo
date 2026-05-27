@@ -90,6 +90,8 @@ No environment variables are required (AI keys are entered per-user in the brows
 | `MAX_VIDEO_BYTES` | `2147483648` (2 GiB) | Hard cap per fetched video |
 | `FETCH_VIDEO_TIMEOUT_MS` | `900000` (15 min) | yt-dlp / direct-fetch timeout |
 | `YTDLP_BIN` | `yt-dlp` | Override path to the yt-dlp binary |
+| `YTDLP_AUTO_UPDATE` | `true` | Set `false` to skip the on-startup `yt-dlp --update-to <channel>` |
+| `YTDLP_UPDATE_CHANNEL` | `nightly` | Update channel — `nightly` (recommended for YouTube), `stable`, or a specific tag |
 | `YTDLP_COOKIES` | _(unset)_ | Inline Netscape-format cookies file content (see below) |
 | `YTDLP_COOKIES_FILE` | _(unset)_ | Alternative: path to an existing cookies file |
 | `YTDLP_EXTRACTOR_ARGS` | `youtube:player_client=default,android,ios,web_safari` | Custom yt-dlp `--extractor-args` |
