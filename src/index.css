@@ -292,53 +292,6 @@ button { font: inherit; }
 .modal__actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
 
 
-/* URL fetcher */
-.upload {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-.upload__divider {
-  display: flex; align-items: center; gap: 0.75rem;
-  color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em;
-}
-.upload__divider::before,
-.upload__divider::after {
-  content: ''; flex: 1; height: 1px; background: var(--border);
-}
-
-.urlbox {
-  display: flex; flex-direction: column; gap: 0.55rem;
-}
-.urlbox__label {
-  font-size: 0.85rem; color: var(--muted);
-}
-.urlbox__row {
-  display: flex; gap: 0.5rem;
-  flex-wrap: wrap;
-}
-.urlbox__row input {
-  flex: 1; min-width: 220px;
-  background: var(--bg-elev-2);
-  border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: 8px;
-  padding: 0.55rem 0.7rem;
-  font: inherit;
-}
-.urlbox__row input:focus {
-  outline: none; border-color: var(--primary);
-}
-.urlbox__progress {
-  display: flex; flex-direction: column; gap: 0.4rem;
-  font-size: 0.85rem;
-}
-.urlbox__hint code {
-  background: var(--bg-elev-2);
-  padding: 1px 5px; border-radius: 4px; font-size: 0.85em;
-}
-
-
 /* Auto-clip CTA */
 .autoclip {
   display: flex; flex-direction: column; gap: 0.7rem;
